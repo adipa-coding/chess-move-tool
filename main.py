@@ -541,66 +541,79 @@ class ChessMoveToolApp(ctk.CTk):
         """Updates the mock engine card with semi-realistic stats based on the board state."""
         board = self.game_manager.get_current_board()
         
-        # Calculate a simple mock evaluation based on material balance
-        material = 0.0
-        for square in chess.SQUARES:
-            piece = board.piece_at(square)
-            if piece:
-                val = 0.0
-                if piece.piece_type == chess.PAWN:
-                    val = 1.0
-                elif piece.piece_type == chess.KNIGHT:
-                    val = 3.0
-                elif piece.piece_type == chess.BISHOP:
-                    val = 3.1
-                elif piece.piece_type == chess.ROOK:
-                    val = 5.0
-                elif piece.piece_type == chess.QUEEN:
-                    val = 9.0
-                
-                if piece.color == chess.WHITE:
-                    material += val
-                else:
-                    material -= val
-                    
-        # Add a small offset based on who's turn it is
-        turn_bonus = 0.15 if board.turn == chess.WHITE else -0.15
-        val_score = material + turn_bonus
-        
-        # Check if mate is possible (e.g. checkmate)
+        # Check if game is over
         if board.is_checkmate():
             if board.turn == chess.WHITE:
-                score_str = "Score: -M0"
-                progress_val = 0.0
+                # White is mated, so score is mate for Black (-M0)
+                self.lbl_sf_eval.configure(text="Score: -M0", text_color="#ef4444")
+                self.eval_bar.set(0.0)
             else:
-                score_str = "Score: +M0"
-                progress_val = 1.0
-        else:
+                self.lbl_sf_eval.configure(text="Score: +M0", text_color="#10b981")
+                self.eval_bar.set(1.0)
+            self.lbl_sf_best.configure(text="Suggested best move: None")
+            return
+        elif board.is_game_over():
+            self.lbl_sf_eval.configure(text="Score: 0.00", text_color="#e2e8f0")
+            self.eval_bar.set(0.5)
+            self.lbl_sf_best.configure(text="Suggested best move: None")
+            return
+            
+        # Run a fast depth 2 minimax search to get actual evaluation and move
+        try:
+            raw_score, best_move = minimax(board, 2, -999999, 999999, board.turn == chess.WHITE)
+            
+            # The score is returned from minimax in centipawns.
+            # To get decimal pawns relative to White:
+            # We scale the score by 100 to get decimal pawns, but scale down positional bonuses slightly
+            # to keep them reasonable and aligned with standard engines.
+            # Standard piece evaluation: P=100, N=320, B=330, R=500, Q=900.
+            # Positional adjustments are scaled by 0.3 to keep scores balanced.
+            
+            # 1. Compute material balance
+            material_score = 0
+            piece_vals = {
+                chess.PAWN: 100,
+                chess.KNIGHT: 320,
+                chess.BISHOP: 330,
+                chess.ROOK: 500,
+                chess.QUEEN: 900
+            }
+            for sq in chess.SQUARES:
+                p = board.piece_at(sq)
+                if p and p.piece_type in piece_vals:
+                    val = piece_vals[p.piece_type]
+                    if p.color == chess.WHITE:
+                        material_score += val
+                    else:
+                        material_score -= val
+                        
+            positional_score = raw_score - material_score
+            val_score = (material_score + positional_score * 0.3) / 100.0
+            
+            # Format evaluation score relative to White
             if val_score >= 0:
                 score_str = f"Score: +{val_score:.2f}"
+                self.lbl_sf_eval.configure(text=score_str, text_color="#10b981")
             else:
                 score_str = f"Score: {val_score:.2f}"
+                self.lbl_sf_eval.configure(text=score_str, text_color="#ef4444")
                 
-            # Compute evaluation bar progress (0 to 1, centered at 0.5)
-            # Clip between -8 and +8
+            # Update evaluation bar (range from -8.0 to +8.0, centered at 0.5)
             clipped_score = max(-8.0, min(8.0, val_score))
             progress_val = (clipped_score + 8.0) / 16.0
+            self.eval_bar.set(progress_val)
             
-        self.lbl_sf_eval.configure(text=score_str)
-        if val_score >= 0:
-            self.lbl_sf_eval.configure(text_color="#10b981") # Green
-        else:
-            self.lbl_sf_eval.configure(text_color="#ef4444") # Red
-            
-        self.eval_bar.set(progress_val)
-        
-        # Suggest a random legal move as "best move hint" to look authentic
-        legal_moves = list(board.legal_moves)
-        if legal_moves:
-            best_move = board.san(legal_moves[0])
-            self.lbl_sf_best.configure(text=f"Suggested best move: {best_move}")
-        else:
-            self.lbl_sf_best.configure(text="Suggested best move: None")
+            # Display best move suggestion
+            if best_move:
+                san_move = board.san(best_move)
+                self.lbl_sf_best.configure(text=f"Suggested best move: {san_move}")
+            else:
+                self.lbl_sf_best.configure(text="Suggested best move: None")
+        except Exception as e:
+            print(f"Error in mock engine calculation: {e}")
+            self.lbl_sf_eval.configure(text="Score: --", text_color="#e2e8f0")
+            self.eval_bar.set(0.5)
+            self.lbl_sf_best.configure(text="Suggested best move: --")
 
     def refresh_moves_tree(self):
         """Re-generates the interactive moves list view with nested variations and highlights."""
@@ -915,6 +928,158 @@ class ChessMoveToolApp(ctk.CTk):
         rgb = tuple(int(hex_color[i:i+2], 16) for i in (0, 2, 4))
         dark_rgb = tuple(max(0, int(c * 0.8)) for c in rgb)
         return '#{:02x}{:02x}{:02x}'.format(*dark_rgb)
+
+# ==========================================
+# CUSTOM CHESS ENGINE HEURISTICS & MINIMAX
+# ==========================================
+
+# Piece-Square Tables (from White's perspective)
+PAWN_PST = [
+    0,  0,  0,  0,  0,  0,  0,  0,
+    5, 10, 10,-20,-20, 10, 10,  5,
+    5, -5,-10,  0,  0,-10, -5,  5,
+    0,  0,  0, 20, 20,  0,  0,  0,
+    5,  5, 10, 25, 25, 10,  5,  5,
+   10, 10, 20, 30, 30, 20, 10, 10,
+   50, 50, 50, 50, 50, 50, 50, 50,
+    0,  0,  0,  0,  0,  0,  0,  0
+]
+
+KNIGHT_PST = [
+   -50,-40,-30,-30,-30,-30,-40,-50,
+   -40,-20,  0,  5,  5,  0,-20,-40,
+   -30,  5, 10, 15, 15, 10,  5,-30,
+   -30,  0, 15, 20, 20, 15,  0,-30,
+   -30,  5, 15, 20, 20, 15,  5,-30,
+   -30,  0, 10, 15, 15, 10,  0,-30,
+   -40,-20,  0,  0,  0,  0,-20,-40,
+   -50,-40,-30,-30,-30,-30,-40,-50
+]
+
+BISHOP_PST = [
+   -20,-10,-10,-10,-10,-10,-10,-20,
+   -10,  5,  0,  0,  0,  0,  5,-10,
+   -10, 10, 10, 10, 10, 10, 10,-10,
+   -10,  0, 10, 10, 10, 10,  0,-10,
+   -10,  5,  5, 10, 10,  5,  5,-10,
+   -10,  0,  0, 10, 10,  0,  0,-10,
+   -10,  0,  0,  0,  0,  0,  0,-10,
+   -20,-10,-10,-10,-10,-10,-10,-20
+]
+
+ROOK_PST = [
+     0,  0,  0,  5,  5,  0,  0,  0,
+    -5,  0,  0,  0,  0,  0,  0, -5,
+    -5,  0,  0,  0,  0,  0,  0, -5,
+    -5,  0,  0,  0,  0,  0,  0, -5,
+    -5,  0,  0,  0,  0,  0,  0, -5,
+    -5,  0,  0,  0,  0,  0,  0, -5,
+     5, 10, 10, 10, 10, 10, 10,  5,
+     0,  0,  0,  0,  0,  0,  0,  0
+]
+
+QUEEN_PST = [
+   -20,-10,-10, -5, -5,-10,-10,-20,
+   -10,  0,  5,  0,  0,  0,  0,-10,
+   -10,  5,  5,  5,  5,  5,  0,-10,
+     0,  0,  5,  5,  5,  5,  0, -5,
+    -5,  0,  5,  5,  5,  5,  0, -5,
+   -10,  0,  5,  5,  5,  5,  0,-10,
+   -10,  0,  0,  0,  0,  0,  0,-10,
+   -20,-10,-10, -5, -5,-10,-10,-20
+]
+
+KING_PST = [
+    20, 30, 10,  0,  0, 10, 30, 20,
+    20, 20,  0,  0,  0,  0, 20, 20,
+   -10,-20,-20,-20,-20,-20,-20,-10,
+   -20,-30,-30,-40,-40,-30,-30,-20,
+   -30,-40,-40,-50,-50,-40,-40,-30,
+   -30,-40,-40,-50,-50,-40,-40,-30,
+   -30,-40,-40,-50,-50,-40,-40,-30,
+   -30,-40,-40,-50,-50,-40,-40,-30
+]
+
+def evaluate_board(board):
+    if board.is_checkmate():
+        return -99999 if board.turn == chess.WHITE else 99999
+    if board.is_stalemate() or board.is_insufficient_material():
+        return 0
+        
+    score = 0
+    piece_vals = {
+        chess.PAWN: 100,
+        chess.KNIGHT: 320,
+        chess.BISHOP: 330,
+        chess.ROOK: 500,
+        chess.QUEEN: 900,
+        chess.KING: 20000
+    }
+    
+    for square in chess.SQUARES:
+        piece = board.piece_at(square)
+        if piece:
+            val = piece_vals[piece.piece_type]
+            sq_idx = square if piece.color == chess.WHITE else chess.square_mirror(square)
+            
+            pst_val = 0
+            if piece.piece_type == chess.PAWN:
+                pst_val = PAWN_PST[sq_idx]
+            elif piece.piece_type == chess.KNIGHT:
+                pst_val = KNIGHT_PST[sq_idx]
+            elif piece.piece_type == chess.BISHOP:
+                pst_val = BISHOP_PST[sq_idx]
+            elif piece.piece_type == chess.ROOK:
+                pst_val = ROOK_PST[sq_idx]
+            elif piece.piece_type == chess.QUEEN:
+                pst_val = QUEEN_PST[sq_idx]
+            elif piece.piece_type == chess.KING:
+                pst_val = KING_PST[sq_idx]
+                
+            if piece.color == chess.WHITE:
+                score += (val + pst_val)
+            else:
+                score -= (val + pst_val)
+                
+    return score
+
+def minimax(board, depth, alpha, beta, maximizing_player):
+    if depth == 0 or board.is_game_over():
+        return evaluate_board(board), None
+        
+    best_move = None
+    if maximizing_player:
+        max_eval = -999999
+        moves = list(board.legal_moves)
+        moves.sort(key=lambda m: board.is_capture(m), reverse=True)
+        
+        for move in moves:
+            board.push(move)
+            eval_score, _ = minimax(board, depth - 1, alpha, beta, False)
+            board.pop()
+            if eval_score > max_eval:
+                max_eval = eval_score
+                best_move = move
+            alpha = max(alpha, eval_score)
+            if beta <= alpha:
+                break
+        return max_eval, best_move
+    else:
+        min_eval = 999999
+        moves = list(board.legal_moves)
+        moves.sort(key=lambda m: board.is_capture(m), reverse=True)
+        
+        for move in moves:
+            board.push(move)
+            eval_score, _ = minimax(board, depth - 1, alpha, beta, True)
+            board.pop()
+            if eval_score < min_eval:
+                min_eval = eval_score
+                best_move = move
+            beta = min(beta, eval_score)
+            if beta <= alpha:
+                break
+        return min_eval, best_move
 
 if __name__ == "__main__":
     app = ChessMoveToolApp()
