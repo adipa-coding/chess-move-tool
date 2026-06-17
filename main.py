@@ -149,9 +149,11 @@ class ChessMoveToolApp(ctk.CTk):
         
         self.tab_moves = self.right_frame.add("Moves Tree")
         self.tab_pgn = self.right_frame.add("Game Info / PGN")
+        self.tab_features = self.right_frame.add("Upcoming Features")
         
         self.setup_moves_tab()
         self.setup_pgn_tab()
+        self.setup_features_tab()
 
     def setup_moves_tab(self):
         # Configure layout for Moves Tree Tab
@@ -328,6 +330,183 @@ class ChessMoveToolApp(ctk.CTk):
         self.btn_export_clip = ctk.CTkButton(self.pgn_actions_frame, text="Copy PGN", fg_color="#1d4ed8", hover_color="#1e40af", command=self.copy_pgn_clipboard)
         self.btn_export_clip.grid(row=0, column=3, padx=5, sticky="ew")
 
+    def setup_features_tab(self):
+        # Configure layout for Features Tab
+        self.tab_features.grid_columnconfigure(0, weight=1)
+        self.tab_features.grid_rowconfigure(0, weight=1) # Scrollable frame for cards
+        
+        # Scrollable container for features list
+        self.features_scroll = ctk.CTkScrollableFrame(self.tab_features, fg_color="transparent")
+        self.features_scroll.grid(row=0, column=0, sticky="nsew", padx=5, pady=5)
+        self.features_scroll.grid_columnconfigure(0, weight=1)
+        
+        # Header title
+        lbl_title = ctk.CTkLabel(
+            self.features_scroll,
+            text="💡 Future Feature Lab & Roadmap",
+            font=("Inter", 16, "bold"),
+            text_color="#38bdf8",
+            anchor="w"
+        )
+        lbl_title.grid(row=0, column=0, pady=(10, 5), padx=10, sticky="w")
+        
+        lbl_desc = ctk.CTkLabel(
+            self.features_scroll,
+            text="Preview and track upcoming features. Cast your vote to prioritize development!",
+            font=("Inter", 11),
+            text_color="#94a3b8",
+            wraplength=350,
+            justify=tk.LEFT,
+            anchor="w"
+        )
+        lbl_desc.grid(row=1, column=0, pady=(0, 15), padx=10, sticky="w")
+        
+        # --- FEATURE CARD 1: STOCKFISH ENGINE PREVIEW ---
+        self.card_stockfish = ctk.CTkFrame(self.features_scroll, fg_color="#1e293b", border_width=1, border_color="#334155")
+        self.card_stockfish.grid(row=2, column=0, pady=10, padx=5, sticky="ew")
+        
+        # Title & Badge
+        header_stockfish = ctk.CTkFrame(self.card_stockfish, fg_color="transparent")
+        header_stockfish.pack(fill=tk.X, padx=10, pady=8)
+        
+        lbl_sf_name = ctk.CTkLabel(header_stockfish, text="🤖 Stockfish Engine Integration", font=("Inter", 13, "bold"), text_color="#f8fafc")
+        lbl_sf_name.pack(side=tk.LEFT)
+        
+        badge_sf = ctk.CTkLabel(
+            header_stockfish,
+            text="Active Preview (75%)",
+            font=("Inter", 9, "bold"),
+            fg_color="#0369a1",
+            text_color="#e0f2fe",
+            corner_radius=4,
+            padx=5
+        )
+        badge_sf.pack(side=tk.RIGHT)
+        
+        # Interactive Live Engine Mockup
+        self.engine_mock_frame = ctk.CTkFrame(self.card_stockfish, fg_color="#0f172a", corner_radius=6)
+        self.engine_mock_frame.pack(fill=tk.X, padx=10, pady=5)
+        
+        # Mock Engine stats
+        stats_frame = ctk.CTkFrame(self.engine_mock_frame, fg_color="transparent")
+        stats_frame.pack(fill=tk.X, padx=10, pady=(8, 4))
+        
+        self.lbl_sf_eval = ctk.CTkLabel(stats_frame, text="Eval: +0.25", font=("Consolas", 11, "bold"), text_color="#10b981")
+        self.lbl_sf_eval.pack(side=tk.LEFT)
+        
+        self.lbl_sf_depth = ctk.CTkLabel(stats_frame, text="Depth: 18/20", font=("Consolas", 10), text_color="#94a3b8")
+        self.lbl_sf_depth.pack(side=tk.RIGHT)
+        
+        # Best move suggestion
+        self.lbl_sf_best = ctk.CTkLabel(self.engine_mock_frame, text="Suggested best move: --", font=("Inter", 10, "italic"), text_color="#cbd5e1", anchor="w")
+        self.lbl_sf_best.pack(fill=tk.X, padx=10, pady=(0, 8))
+        
+        # Simulated Progress/Evaluation Bar
+        self.eval_bar = ctk.CTkProgressBar(self.card_stockfish, height=8, progress_color="#10b981", fg_color="#ef4444")
+        self.eval_bar.pack(fill=tk.X, padx=10, pady=(5, 10))
+        self.eval_bar.set(0.5) # Neutral center
+        
+        # Vote Button
+        self.btn_vote_sf = ctk.CTkButton(
+            self.card_stockfish,
+            text="Vote for this feature",
+            font=("Inter", 11),
+            fg_color="#334155",
+            hover_color="#475569",
+            height=26,
+            command=lambda: self.vote_feature("Stockfish Engine")
+        )
+        self.btn_vote_sf.pack(fill=tk.X, padx=10, pady=(0, 10))
+        
+        # --- FEATURE CARD 2: INTERACTIVE TRAINER ---
+        self.card_trainer = ctk.CTkFrame(self.features_scroll, fg_color="#1e293b", border_width=1, border_color="#334155")
+        self.card_trainer.grid(row=3, column=0, pady=10, padx=5, sticky="ew")
+        
+        header_trainer = ctk.CTkFrame(self.card_trainer, fg_color="transparent")
+        header_trainer.pack(fill=tk.X, padx=10, pady=8)
+        
+        lbl_tr_name = ctk.CTkLabel(header_trainer, text="🎓 Opening Repertoire Trainer", font=("Inter", 13, "bold"), text_color="#f8fafc")
+        lbl_tr_name.pack(side=tk.LEFT)
+        
+        badge_tr = ctk.CTkLabel(
+            header_trainer,
+            text="Planned (40%)",
+            font=("Inter", 9, "bold"),
+            fg_color="#c2410c",
+            text_color="#ffedd5",
+            corner_radius=4,
+            padx=5
+        )
+        badge_tr.pack(side=tk.RIGHT)
+        
+        lbl_tr_desc = ctk.CTkLabel(
+            self.card_trainer,
+            text="Train variations flashcard-style! The app will guide you through moves and alert you if you deviate from your saved book.",
+            font=("Inter", 11),
+            text_color="#94a3b8",
+            wraplength=340,
+            justify=tk.LEFT,
+            anchor="w"
+        )
+        lbl_tr_desc.pack(fill=tk.X, padx=10, pady=(0, 10))
+        
+        self.btn_vote_tr = ctk.CTkButton(
+            self.card_trainer,
+            text="Vote for this feature",
+            font=("Inter", 11),
+            fg_color="#334155",
+            hover_color="#475569",
+            height=26,
+            command=lambda: self.vote_feature("Repertoire Trainer")
+        )
+        self.btn_vote_tr.pack(fill=tk.X, padx=10, pady=(0, 10))
+        
+        # --- FEATURE CARD 3: MASTERS EXPLORER ---
+        self.card_explorer = ctk.CTkFrame(self.features_scroll, fg_color="#1e293b", border_width=1, border_color="#334155")
+        self.card_explorer.grid(row=4, column=0, pady=10, padx=5, sticky="ew")
+        
+        header_explorer = ctk.CTkFrame(self.card_explorer, fg_color="transparent")
+        header_explorer.pack(fill=tk.X, padx=10, pady=8)
+        
+        lbl_ex_name = ctk.CTkLabel(header_explorer, text="🌐 Masters Database Explorer", font=("Inter", 13, "bold"), text_color="#f8fafc")
+        lbl_ex_name.pack(side=tk.LEFT)
+        
+        badge_ex = ctk.CTkLabel(
+            header_explorer,
+            text="Planned (15%)",
+            font=("Inter", 9, "bold"),
+            fg_color="#4b5563",
+            text_color="#f3f4f6",
+            corner_radius=4,
+            padx=5
+        )
+        badge_ex.pack(side=tk.RIGHT)
+        
+        lbl_ex_desc = ctk.CTkLabel(
+            self.card_explorer,
+            text="Directly view and analyze historical games played by grandmasters from the exact same position via online APIs.",
+            font=("Inter", 11),
+            text_color="#94a3b8",
+            wraplength=340,
+            justify=tk.LEFT,
+            anchor="w"
+        )
+        lbl_ex_desc.pack(fill=tk.X, padx=10, pady=(0, 10))
+        
+        self.btn_vote_ex = ctk.CTkButton(
+            self.card_explorer,
+            text="Vote for this feature",
+            font=("Inter", 11),
+            fg_color="#334155",
+            hover_color="#475569",
+            height=26,
+            command=lambda: self.vote_feature("Masters Explorer")
+        )
+        self.btn_vote_ex.pack(fill=tk.X, padx=10, pady=(0, 10))
+
+    def vote_feature(self, feature_name):
+        messagebox.showinfo("Voted!", f"Thank you for voting for '{feature_name}'! Your vote has been recorded.")
+
     # --- UI Synchronization ---
     def update_ui(self):
         """Redraws the board, refreshes the moves tree list, and refreshes the metadata panel."""
@@ -337,6 +516,7 @@ class ChessMoveToolApp(ctk.CTk):
         self.refresh_headers_panel()
         self.refresh_raw_pgn()
         self.update_opening_display()
+        self.update_mock_engine()
 
     def update_opening_display(self):
         """Fetches and shows the current opening name and ECO badge in the header."""
@@ -356,6 +536,71 @@ class ChessMoveToolApp(ctk.CTk):
                 self.lbl_opening_name.configure(text="Starting Position")
             else:
                 self.lbl_opening_name.configure(text="Custom / Unknown Opening")
+
+    def update_mock_engine(self):
+        """Updates the mock engine card with semi-realistic stats based on the board state."""
+        board = self.game_manager.get_current_board()
+        
+        # Calculate a simple mock evaluation based on material balance
+        material = 0.0
+        for square in chess.SQUARES:
+            piece = board.piece_at(square)
+            if piece:
+                val = 0.0
+                if piece.piece_type == chess.PAWN:
+                    val = 1.0
+                elif piece.piece_type == chess.KNIGHT:
+                    val = 3.0
+                elif piece.piece_type == chess.BISHOP:
+                    val = 3.1
+                elif piece.piece_type == chess.ROOK:
+                    val = 5.0
+                elif piece.piece_type == chess.QUEEN:
+                    val = 9.0
+                
+                if piece.color == chess.WHITE:
+                    material += val
+                else:
+                    material -= val
+                    
+        # Add a small offset based on who's turn it is
+        turn_bonus = 0.15 if board.turn == chess.WHITE else -0.15
+        val_score = material + turn_bonus
+        
+        # Check if mate is possible (e.g. checkmate)
+        if board.is_checkmate():
+            if board.turn == chess.WHITE:
+                score_str = "Score: -M0"
+                progress_val = 0.0
+            else:
+                score_str = "Score: +M0"
+                progress_val = 1.0
+        else:
+            if val_score >= 0:
+                score_str = f"Score: +{val_score:.2f}"
+            else:
+                score_str = f"Score: {val_score:.2f}"
+                
+            # Compute evaluation bar progress (0 to 1, centered at 0.5)
+            # Clip between -8 and +8
+            clipped_score = max(-8.0, min(8.0, val_score))
+            progress_val = (clipped_score + 8.0) / 16.0
+            
+        self.lbl_sf_eval.configure(text=score_str)
+        if val_score >= 0:
+            self.lbl_sf_eval.configure(text_color="#10b981") # Green
+        else:
+            self.lbl_sf_eval.configure(text_color="#ef4444") # Red
+            
+        self.eval_bar.set(progress_val)
+        
+        # Suggest a random legal move as "best move hint" to look authentic
+        legal_moves = list(board.legal_moves)
+        if legal_moves:
+            best_move = board.san(legal_moves[0])
+            self.lbl_sf_best.configure(text=f"Suggested best move: {best_move}")
+        else:
+            self.lbl_sf_best.configure(text="Suggested best move: None")
 
     def refresh_moves_tree(self):
         """Re-generates the interactive moves list view with nested variations and highlights."""
