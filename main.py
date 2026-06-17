@@ -564,31 +564,9 @@ class ChessMoveToolApp(ctk.CTk):
             
             # The score is returned from minimax in centipawns.
             # To get decimal pawns relative to White:
-            # We scale the score by 100 to get decimal pawns, but scale down positional bonuses slightly
-            # to keep them reasonable and aligned with standard engines.
-            # Standard piece evaluation: P=100, N=320, B=330, R=500, Q=900.
-            # Positional adjustments are scaled by 0.3 to keep scores balanced.
-            
-            # 1. Compute material balance
-            material_score = 0
-            piece_vals = {
-                chess.PAWN: 100,
-                chess.KNIGHT: 320,
-                chess.BISHOP: 330,
-                chess.ROOK: 500,
-                chess.QUEEN: 900
-            }
-            for sq in chess.SQUARES:
-                p = board.piece_at(sq)
-                if p and p.piece_type in piece_vals:
-                    val = piece_vals[p.piece_type]
-                    if p.color == chess.WHITE:
-                        material_score += val
-                    else:
-                        material_score -= val
-                        
-            positional_score = raw_score - material_score
-            val_score = (material_score + positional_score * 0.3) / 100.0
+            # The score is returned from minimax in centipawns.
+            # To get decimal pawns relative to White, we divide by 100.0.
+            val_score = raw_score / 100.0
             
             # Format evaluation score relative to White
             if val_score >= 0:
@@ -1036,16 +1014,62 @@ def evaluate_board(board):
             elif piece.piece_type == chess.KING:
                 pst_val = KING_PST[sq_idx]
                 
+            scaled_pst = pst_val / 10.0
             if piece.color == chess.WHITE:
-                score += (val + pst_val)
+                score += (val + scaled_pst)
             else:
-                score -= (val + pst_val)
+                score -= (val + scaled_pst)
                 
     return score
 
+def quiescence_search(board, alpha, beta, maximizing_player):
+    stand_pat = evaluate_board(board)
+    
+    if maximizing_player:
+        if stand_pat >= beta:
+            return beta
+        if alpha < stand_pat:
+            alpha = stand_pat
+            
+        moves = [m for m in board.legal_moves if board.is_capture(m)]
+        moves.sort(key=lambda m: board.is_capture(m), reverse=True)
+        
+        for move in moves:
+            board.push(move)
+            score = quiescence_search(board, alpha, beta, False)
+            board.pop()
+            
+            if score >= beta:
+                return beta
+            if score > alpha:
+                alpha = score
+        return alpha
+    else:
+        if stand_pat <= alpha:
+            return alpha
+        if beta > stand_pat:
+            beta = stand_pat
+            
+        moves = [m for m in board.legal_moves if board.is_capture(m)]
+        moves.sort(key=lambda m: board.is_capture(m), reverse=True)
+        
+        for move in moves:
+            board.push(move)
+            score = quiescence_search(board, alpha, beta, True)
+            board.pop()
+            
+            if score <= alpha:
+                return alpha
+            if score < beta:
+                beta = score
+        return beta
+
 def minimax(board, depth, alpha, beta, maximizing_player):
-    if depth == 0 or board.is_game_over():
+    if board.is_game_over():
         return evaluate_board(board), None
+        
+    if depth == 0:
+        return quiescence_search(board, alpha, beta, maximizing_player), None
         
     best_move = None
     if maximizing_player:
