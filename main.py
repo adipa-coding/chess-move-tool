@@ -4,6 +4,7 @@ import customtkinter as ctk
 import chess
 import chess.pgn
 import os
+import threading
 
 from game_manager import ChessGameManager
 from chess_board import ChessBoard
@@ -23,6 +24,10 @@ class ChessMoveToolApp(ctk.CTk):
         # Load state manager
         self.game_manager = ChessGameManager()
         self.active_tag = None
+        
+        # Thread search state
+        self.search_thread = None
+        self.stop_search_flag = False
         
         self.setup_ui()
         self.update_ui()
@@ -537,61 +542,86 @@ class ChessMoveToolApp(ctk.CTk):
             else:
                 self.lbl_opening_name.configure(text="Custom / Unknown Opening")
 
+    def update_engine_ui(self, board, raw_score, best_move):
+        """Safely updates engine GUI widgets with evaluation results (runs on main thread)."""
+        val_score = raw_score / 100.0
+        
+        # Format evaluation score relative to White
+        if val_score >= 0:
+            score_str = f"Score: +{val_score:.2f}"
+            self.lbl_sf_eval.configure(text=score_str, text_color="#10b981")
+        else:
+            score_str = f"Score: {val_score:.2f}"
+            self.lbl_sf_eval.configure(text=score_str, text_color="#ef4444")
+            
+        # Update evaluation bar (range from -8.0 to +8.0, centered at 0.5)
+        clipped_score = max(-8.0, min(8.0, val_score))
+        progress_val = (clipped_score + 8.0) / 16.0
+        self.eval_bar.set(progress_val)
+        
+        # Display best move suggestion
+        if best_move:
+            san_move = board.san(best_move)
+            self.lbl_sf_best.configure(text=f"Suggested best move: {san_move}")
+        else:
+            self.lbl_sf_best.configure(text="Suggested best move: None")
+            
+        self.lbl_sf_depth.configure(text="Depth: 3/3")
+
     def update_mock_engine(self):
         """Updates the mock engine card with semi-realistic stats based on the board state."""
+        # Stop any active background searches
+        self.stop_search_flag = True
+        
         board = self.game_manager.get_current_board()
         
         # Check if game is over
         if board.is_checkmate():
             if board.turn == chess.WHITE:
-                # White is mated, so score is mate for Black (-M0)
                 self.lbl_sf_eval.configure(text="Score: -M0", text_color="#ef4444")
                 self.eval_bar.set(0.0)
             else:
                 self.lbl_sf_eval.configure(text="Score: +M0", text_color="#10b981")
                 self.eval_bar.set(1.0)
             self.lbl_sf_best.configure(text="Suggested best move: None")
+            self.lbl_sf_depth.configure(text="Depth: --")
             return
         elif board.is_game_over():
             self.lbl_sf_eval.configure(text="Score: 0.00", text_color="#e2e8f0")
             self.eval_bar.set(0.5)
             self.lbl_sf_best.configure(text="Suggested best move: None")
+            self.lbl_sf_depth.configure(text="Depth: --")
             return
             
-        # Run a fast depth 2 minimax search to get actual evaluation and move
-        try:
-            raw_score, best_move = minimax(board, 2, -999999, 999999, board.turn == chess.WHITE)
-            
-            # The score is returned from minimax in centipawns.
-            # To get decimal pawns relative to White:
-            # The score is returned from minimax in centipawns.
-            # To get decimal pawns relative to White, we divide by 100.0.
-            val_score = raw_score / 100.0
-            
-            # Format evaluation score relative to White
-            if val_score >= 0:
-                score_str = f"Score: +{val_score:.2f}"
-                self.lbl_sf_eval.configure(text=score_str, text_color="#10b981")
-            else:
-                score_str = f"Score: {val_score:.2f}"
-                self.lbl_sf_eval.configure(text=score_str, text_color="#ef4444")
+        # Display calculating indicator
+        self.lbl_sf_eval.configure(text="Score: Calculating...", text_color="#cbd5e1")
+        self.lbl_sf_best.configure(text="Suggested best move: Calculating...")
+        self.lbl_sf_depth.configure(text="Depth: Calculating...")
+        
+        # Copy board to avoid race conditions with main thread GUI updates
+        board_copy = board.copy()
+        self.stop_search_flag = False
+        
+        def run_search():
+            try:
+                raw_score, best_move = minimax(
+                    board_copy, 
+                    3, 
+                    -999999, 
+                    999999, 
+                    board_copy.turn == chess.WHITE, 
+                    stop_flag_func=lambda: self.stop_search_flag
+                )
+                if self.stop_search_flag:
+                    return
+                # Safely schedule GUI updates on Tkinter main event thread
+                self.after(0, lambda: self.update_engine_ui(board_copy, raw_score, best_move))
+            except Exception as e:
+                print(f"Background engine search error: {e}")
+                self.after(0, lambda: self.lbl_sf_eval.configure(text="Score: Error", text_color="#ef4444"))
                 
-            # Update evaluation bar (range from -8.0 to +8.0, centered at 0.5)
-            clipped_score = max(-8.0, min(8.0, val_score))
-            progress_val = (clipped_score + 8.0) / 16.0
-            self.eval_bar.set(progress_val)
-            
-            # Display best move suggestion
-            if best_move:
-                san_move = board.san(best_move)
-                self.lbl_sf_best.configure(text=f"Suggested best move: {san_move}")
-            else:
-                self.lbl_sf_best.configure(text="Suggested best move: None")
-        except Exception as e:
-            print(f"Error in mock engine calculation: {e}")
-            self.lbl_sf_eval.configure(text="Score: --", text_color="#e2e8f0")
-            self.eval_bar.set(0.5)
-            self.lbl_sf_best.configure(text="Suggested best move: --")
+        self.search_thread = threading.Thread(target=run_search, daemon=True)
+        self.search_thread.start()
 
     def refresh_moves_tree(self):
         """Re-generates the interactive moves list view with nested variations and highlights."""
@@ -994,49 +1024,83 @@ def evaluate_board(board):
         chess.KING: 20000
     }
     
-    for square in chess.SQUARES:
-        piece = board.piece_at(square)
-        if piece:
-            val = piece_vals[piece.piece_type]
-            sq_idx = square if piece.color == chess.WHITE else chess.square_mirror(square)
-            
-            pst_val = 0
-            if piece.piece_type == chess.PAWN:
-                pst_val = PAWN_PST[sq_idx]
-            elif piece.piece_type == chess.KNIGHT:
-                pst_val = KNIGHT_PST[sq_idx]
-            elif piece.piece_type == chess.BISHOP:
-                pst_val = BISHOP_PST[sq_idx]
-            elif piece.piece_type == chess.ROOK:
-                pst_val = ROOK_PST[sq_idx]
-            elif piece.piece_type == chess.QUEEN:
-                pst_val = QUEEN_PST[sq_idx]
-            elif piece.piece_type == chess.KING:
-                pst_val = KING_PST[sq_idx]
-                
-            scaled_pst = pst_val / 10.0
+    white_has_queen = False
+    black_has_queen = False
+    
+    piece_map = board.piece_map()
+    for square, piece in piece_map.items():
+        val = piece_vals[piece.piece_type]
+        sq_idx = square if piece.color == chess.WHITE else chess.square_mirror(square)
+        
+        pst_val = 0
+        if piece.piece_type == chess.PAWN:
+            pst_val = PAWN_PST[sq_idx]
+        elif piece.piece_type == chess.KNIGHT:
+            pst_val = KNIGHT_PST[sq_idx]
+        elif piece.piece_type == chess.BISHOP:
+            pst_val = BISHOP_PST[sq_idx]
+        elif piece.piece_type == chess.ROOK:
+            pst_val = ROOK_PST[sq_idx]
+        elif piece.piece_type == chess.QUEEN:
+            pst_val = QUEEN_PST[sq_idx]
             if piece.color == chess.WHITE:
-                score += (val + scaled_pst)
+                white_has_queen = True
             else:
-                score -= (val + scaled_pst)
-                
+                black_has_queen = True
+        elif piece.piece_type == chess.KING:
+            pst_val = KING_PST[sq_idx]
+            
+        scaled_pst = pst_val / 10.0
+        if piece.color == chess.WHITE:
+            score += (val + scaled_pst)
+        else:
+            score -= (val + scaled_pst)
+            
+    # King safety heuristic (penalize center-exposed kings when queens are active)
+    white_king_sq = board.king(chess.WHITE)
+    if white_king_sq is not None:
+        file = chess.square_file(white_king_sq)
+        rank = chess.square_rank(white_king_sq)
+        if (2 <= rank <= 5) and (2 <= file <= 5) and black_has_queen:
+            score -= 250
+            
+    black_king_sq = board.king(chess.BLACK)
+    if black_king_sq is not None:
+        file = chess.square_file(black_king_sq)
+        rank = chess.square_rank(black_king_sq)
+        if (2 <= rank <= 5) and (2 <= file <= 5) and white_has_queen:
+            score += 250
+            
     return score
 
-def quiescence_search(board, alpha, beta, maximizing_player):
-    stand_pat = evaluate_board(board)
+def quiescence_search(board, alpha, beta, maximizing_player, stop_flag_func=None):
+    if stop_flag_func and stop_flag_func():
+        return evaluate_board(board)
+        
+    in_check = board.is_check()
+    if not in_check:
+        stand_pat = evaluate_board(board)
+        if maximizing_player:
+            if stand_pat >= beta:
+                return beta
+            if alpha < stand_pat:
+                alpha = stand_pat
+        else:
+            if stand_pat <= alpha:
+                return alpha
+            if beta > stand_pat:
+                beta = stand_pat
+                
+    if in_check:
+        moves = list(board.legal_moves)
+    else:
+        moves = [m for m in board.legal_moves if board.is_capture(m)]
+    moves.sort(key=lambda m: board.is_capture(m), reverse=True)
     
     if maximizing_player:
-        if stand_pat >= beta:
-            return beta
-        if alpha < stand_pat:
-            alpha = stand_pat
-            
-        moves = [m for m in board.legal_moves if board.is_capture(m)]
-        moves.sort(key=lambda m: board.is_capture(m), reverse=True)
-        
         for move in moves:
             board.push(move)
-            score = quiescence_search(board, alpha, beta, False)
+            score = quiescence_search(board, alpha, beta, False, stop_flag_func)
             board.pop()
             
             if score >= beta:
@@ -1045,17 +1109,9 @@ def quiescence_search(board, alpha, beta, maximizing_player):
                 alpha = score
         return alpha
     else:
-        if stand_pat <= alpha:
-            return alpha
-        if beta > stand_pat:
-            beta = stand_pat
-            
-        moves = [m for m in board.legal_moves if board.is_capture(m)]
-        moves.sort(key=lambda m: board.is_capture(m), reverse=True)
-        
         for move in moves:
             board.push(move)
-            score = quiescence_search(board, alpha, beta, True)
+            score = quiescence_search(board, alpha, beta, True, stop_flag_func)
             board.pop()
             
             if score <= alpha:
@@ -1064,12 +1120,23 @@ def quiescence_search(board, alpha, beta, maximizing_player):
                 beta = score
         return beta
 
-def minimax(board, depth, alpha, beta, maximizing_player):
+def minimax(board, depth, alpha, beta, maximizing_player, extensions=0, stop_flag_func=None):
+    if stop_flag_func and stop_flag_func():
+        return evaluate_board(board), None
+        
     if board.is_game_over():
         return evaluate_board(board), None
         
-    if depth == 0:
-        return quiescence_search(board, alpha, beta, maximizing_player), None
+    in_check = board.is_check()
+    if in_check and extensions < 2:
+        depth_next = max(1, depth)
+        extensions_next = extensions + 1
+    else:
+        depth_next = depth - 1
+        extensions_next = extensions
+        
+    if depth_next <= 0:
+        return quiescence_search(board, alpha, beta, maximizing_player, stop_flag_func), None
         
     best_move = None
     if maximizing_player:
@@ -1079,7 +1146,7 @@ def minimax(board, depth, alpha, beta, maximizing_player):
         
         for move in moves:
             board.push(move)
-            eval_score, _ = minimax(board, depth - 1, alpha, beta, False)
+            eval_score, _ = minimax(board, depth_next, alpha, beta, False, extensions_next, stop_flag_func)
             board.pop()
             if eval_score > max_eval:
                 max_eval = eval_score
@@ -1095,7 +1162,7 @@ def minimax(board, depth, alpha, beta, maximizing_player):
         
         for move in moves:
             board.push(move)
-            eval_score, _ = minimax(board, depth - 1, alpha, beta, True)
+            eval_score, _ = minimax(board, depth_next, alpha, beta, True, extensions_next, stop_flag_func)
             board.pop()
             if eval_score < min_eval:
                 min_eval = eval_score
