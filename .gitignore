@@ -8,3 +8,6 @@ autosave.pgn
 # OS metadata
 .DS_Store
 Thumbs.db
+
+#test file for eval
+test_eval.py
