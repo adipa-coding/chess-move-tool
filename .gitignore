@@ -1,0 +1,10 @@
+# Python cache files
+__pycache__/
+*.pyc
+
+# Local autosave game files
+autosave.pgn
+
+# OS metadata
+.DS_Store
+Thumbs.db
