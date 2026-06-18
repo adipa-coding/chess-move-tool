@@ -12,8 +12,9 @@ Thumbs.db
 #test file for eval
 test_eval.py
 
-#dist folder
+#dist,build folder
 dist
+build
 
 # Chess Engine Binaries
 assets/bin/
