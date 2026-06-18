@@ -26,6 +26,17 @@ class ChessMoveToolApp(ctk.CTk):
         self.geometry("1200x750")
         self.minsize(1000, 650)
         
+        # Set window icon
+        icon_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets", "logo.png")
+        if os.path.exists(icon_path):
+            try:
+                from PIL import Image, ImageTk
+                img = Image.open(icon_path)
+                photo = ImageTk.PhotoImage(img)
+                self.iconphoto(True, photo)
+            except Exception as e:
+                print(f"Error setting window icon: {e}")
+        
         # Load state manager
         self.game_manager = ChessGameManager()
         self.active_tag = None

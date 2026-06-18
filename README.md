@@ -1,5 +1,9 @@
 # Chess Move Tool & PGN Analyzer
 
+<p align="center">
+  <img src="assets/logo.png" alt="Chess Move Tool Logo" width="180"/>
+</p>
+
 A desktop application for analyzing chess positions, recording opening variations, annotating moves, and importing/exporting games using PGN files. Built using Python, **CustomTkinter** for a modern dark-themed GUI, and the **python-chess** library for game rules validation.
 
 ---
