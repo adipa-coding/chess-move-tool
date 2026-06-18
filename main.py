@@ -797,15 +797,15 @@ class ChessMoveToolApp(ctk.CTk):
             return
             
         board = self.game_manager.get_current_board()
+        active_node_at_start = self.game_manager.active_node
         
         # Check if game is over
         if board.is_checkmate():
-            if board.turn == chess.WHITE:
-                self.lbl_sf_eval.configure(text="Score: -M0", text_color="#ef4444")
-                self.eval_bar.set(0.0)
-            else:
-                self.lbl_sf_eval.configure(text="Score: +M0", text_color="#10b981")
-                self.eval_bar.set(1.0)
+            self.lbl_sf_eval.configure(
+                text="Score: #", 
+                text_color="#10b981" if board.turn == chess.BLACK else "#ef4444"
+            )
+            self.eval_bar.set(1.0 if board.turn == chess.BLACK else 0.0)
             self.lbl_sf_best.configure(text="Suggested best move: None")
             self.lbl_sf_depth.configure(text="Depth: --")
             self.lbl_sf_speed.configure(text="Speed: --")
@@ -855,17 +855,17 @@ class ChessMoveToolApp(ctk.CTk):
                         current_time = time.time()
                         if current_time - self.last_engine_ui_update >= 0.1:
                             self.last_engine_ui_update = current_time
-                            self.after(0, lambda s=score, d=depth, n=nps, p=pv: self.update_engine_ui_real(board_copy, s, d, n, p))
+                            self.after(0, lambda s=score, d=depth, n=nps, p=pv: self.update_engine_ui_real(active_node_at_start, board_copy, s, d, n, p))
             except Exception as e:
                 print(f"Background engine search error: {e}")
                 
         self.search_thread = threading.Thread(target=run_search, daemon=True)
         self.search_thread.start()
 
-    def update_engine_ui_real(self, board, score, depth, nps, pv):
+    def update_engine_ui_real(self, node, board, score, depth, nps, pv):
         """Safely updates engine GUI widgets with evaluation results (runs on main thread)."""
-        # Race-condition check: verify this update matches the current active FEN
-        if board.fen() != self.game_manager.get_current_board().fen():
+        # Race-condition check: verify this update matches the active node we started on
+        if node != self.game_manager.active_node:
             return
             
         if not self.engine_enabled:
