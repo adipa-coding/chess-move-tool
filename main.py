@@ -906,13 +906,27 @@ class ChessMoveToolApp(ctk.CTk):
                 self.board.engine_best_move = None
                 self.board.draw_board()
             return
-        elif board.is_game_over():
+        elif board.is_game_over() or board.can_claim_draw():
+            reason = "Draw"
+            if board.is_stalemate():
+                reason = "Draw (Stalemate)"
+            elif board.is_insufficient_material():
+                reason = "Draw (Insufficient Material)"
+            elif board.can_claim_threefold_repetition():
+                reason = "Draw (Threefold Repetition)"
+            elif board.can_claim_fifty_moves():
+                reason = "Draw (50-Move Rule)"
+            elif board.is_fivefold_repetition():
+                reason = "Draw (Fivefold Repetition)"
+            elif board.is_seventyfive_moves():
+                reason = "Draw (75-Move Rule)"
+                
             self.lbl_sf_eval.configure(text="Score: 0.00", text_color="#e2e8f0")
             self.eval_bar.set(0.5)
             self.lbl_sf_best.configure(text="Suggested best move: None")
             self.lbl_sf_depth.configure(text="Depth: --")
             self.lbl_sf_speed.configure(text="Speed: --")
-            self.lbl_sf_pv.configure(text="Line: Draw")
+            self.lbl_sf_pv.configure(text=f"Line: {reason}")
             
             if hasattr(self.board, "engine_best_move"):
                 self.board.engine_best_move = None
@@ -1525,7 +1539,9 @@ def minimax(board, depth, alpha, beta, maximizing_player, extensions=0, stop_fla
     if stop_flag_func and stop_flag_func():
         return evaluate_board(board), None
         
-    if board.is_game_over():
+    if board.is_game_over() or board.can_claim_draw():
+        if not board.is_checkmate():
+            return 0, None
         return evaluate_board(board), None
         
     in_check = board.is_check()
