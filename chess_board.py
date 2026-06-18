@@ -48,7 +48,7 @@ class ChessBoard(tk.Canvas):
         self.load_pieces()
         
         # Event bindings
-        self.bind("<Configure>", self.on_resize)
+        parent.bind("<Configure>", self.on_resize)
         self.bind("<Button-1>", self.on_left_click)
         self.bind("<B1-Motion>", self.on_drag)
         self.bind("<ButtonRelease-1>", self.on_release)
@@ -64,7 +64,10 @@ class ChessBoard(tk.Canvas):
         self.piece_images = load_pieces_images(self.piece_theme, (self.square_size, self.square_size))
 
     def on_resize(self, event):
-        """Handles canvas resizing to keep the board responsive."""
+        """Handles parent container resizing to keep the board responsive."""
+        if event.widget != self.master:
+            return
+            
         size = min(event.width, event.height)
         if size < 200:
             return  # Don't resize too small
