@@ -7,6 +7,7 @@ A desktop application for analyzing chess positions, recording opening variation
 ## Features
 
 - **Interactive Chessboard**: Fully-featured board with drag-and-drop support (or clicking start and end squares) for playing moves. Supports flipping the board direction.
+- **Stockfish 16.1 Engine**: Real-time position analysis utilizing the official Stockfish engine. Displays evaluation scores, depth, calculation speed (NPS), suggested best moves, and principal variation (PV) lines. Draws a visual dashed blue arrow for the recommended move on the board. Features auto-discovery of local binaries and an in-app downloader.
 - **Dynamic Opening Recognition**: Displays the ECO code and opening/variation name dynamically as you play (e.g., *C50 Giuoco Piano*). Matches the closest book variation if you branch off into custom moves.
 - **Interactive Move Tree**: Displays a Lichess-style variation tree showing main lines, nested branches, move numbers, and inline annotations.
 - **Move Annotations**: Annotate moves with Chess.com/Lichess-style badges:
@@ -64,8 +65,8 @@ python main.py
 
 ## Project Structure
 
-- `main.py`: The entry point containing the CustomTkinter GUI layout, UI event bindings, and tabs.
-- `chess_board.py`: Manages chessboard rendering, square coloring, coordinates, drawing arrows/highlights, and move logic.
+- `main.py`: The entry point containing the CustomTkinter GUI layout, sidebar layout, tab system, and background Stockfish engine controllers.
+- `chess_board.py`: Manages chessboard rendering, square coloring, coordinates, drawing arrows/highlights, engine suggested moves, and move logic.
 - `game_manager.py`: Manages the underlying game state, move trees, variations, PGN imports/exports, autosaving, and opening name resolution.
 - `theme.py`: Configures application color palettes, board theme presets, and move annotation NAG styles.
 - `compile_openings.py`: Utility script that downloads, parses, and compiles Lichess's open-source ECO database to `openings.json` using normalized FEN keys.

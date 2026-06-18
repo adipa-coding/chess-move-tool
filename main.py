@@ -5,6 +5,10 @@ import chess
 import chess.pgn
 import os
 import threading
+import urllib.request
+import zipfile
+import shutil
+import time
 
 from game_manager import ChessGameManager
 from chess_board import ChessBoard
@@ -29,11 +33,21 @@ class ChessMoveToolApp(ctk.CTk):
         self.search_thread = None
         self.stop_search_flag = False
         
+        # Stockfish engine state
+        self.engine = None
+        self.engine_enabled = False
+        self.stockfish_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets", "bin", "stockfish.exe")
+        self.current_analysis = None
+        self.last_engine_ui_update = 0
+        
         self.setup_ui()
         self.update_ui()
         
         # Ensure scroll to active tag works on startup
         self.after(500, self.scroll_to_active_move)
+        
+        # Closing protocol
+        self.protocol("WM_DELETE_WINDOW", self.on_closing)
 
     def setup_ui(self):
         # Configure layout grids
@@ -148,9 +162,17 @@ class ChessMoveToolApp(ctk.CTk):
         self.bind("<Up>", lambda e: self.go_first())
         self.bind("<Down>", lambda e: self.go_last())
 
-        # --- RIGHT SIDE: ANALYZE PANELS ---
-        self.right_frame = ctk.CTkTabview(self)
-        self.right_frame.grid(row=0, column=1, sticky="nsew", padx=10, pady=10)
+        # --- RIGHT SIDE: CONTAINER & ANALYZE PANELS ---
+        self.right_container = ctk.CTkFrame(self, fg_color="transparent")
+        self.right_container.grid(row=0, column=1, sticky="nsew", padx=10, pady=10)
+        self.right_container.grid_columnconfigure(0, weight=1)
+        self.right_container.grid_rowconfigure(0, weight=0) # Engine frame
+        self.right_container.grid_rowconfigure(1, weight=1) # Tabview
+        
+        self.setup_engine_panel()
+        
+        self.right_frame = ctk.CTkTabview(self.right_container)
+        self.right_frame.grid(row=1, column=0, sticky="nsew")
         
         self.tab_moves = self.right_frame.add("Moves Tree")
         self.tab_pgn = self.right_frame.add("Game Info / PGN")
@@ -366,66 +388,9 @@ class ChessMoveToolApp(ctk.CTk):
         )
         lbl_desc.grid(row=1, column=0, pady=(0, 15), padx=10, sticky="w")
         
-        # --- FEATURE CARD 1: STOCKFISH ENGINE PREVIEW ---
-        self.card_stockfish = ctk.CTkFrame(self.features_scroll, fg_color="#1e293b", border_width=1, border_color="#334155")
-        self.card_stockfish.grid(row=2, column=0, pady=10, padx=5, sticky="ew")
-        
-        # Title & Badge
-        header_stockfish = ctk.CTkFrame(self.card_stockfish, fg_color="transparent")
-        header_stockfish.pack(fill=tk.X, padx=10, pady=8)
-        
-        lbl_sf_name = ctk.CTkLabel(header_stockfish, text="🤖 Stockfish Engine Integration", font=("Inter", 13, "bold"), text_color="#f8fafc")
-        lbl_sf_name.pack(side=tk.LEFT)
-        
-        badge_sf = ctk.CTkLabel(
-            header_stockfish,
-            text="Active Preview (75%)",
-            font=("Inter", 9, "bold"),
-            fg_color="#0369a1",
-            text_color="#e0f2fe",
-            corner_radius=4,
-            padx=5
-        )
-        badge_sf.pack(side=tk.RIGHT)
-        
-        # Interactive Live Engine Mockup
-        self.engine_mock_frame = ctk.CTkFrame(self.card_stockfish, fg_color="#0f172a", corner_radius=6)
-        self.engine_mock_frame.pack(fill=tk.X, padx=10, pady=5)
-        
-        # Mock Engine stats
-        stats_frame = ctk.CTkFrame(self.engine_mock_frame, fg_color="transparent")
-        stats_frame.pack(fill=tk.X, padx=10, pady=(8, 4))
-        
-        self.lbl_sf_eval = ctk.CTkLabel(stats_frame, text="Eval: +0.25", font=("Consolas", 11, "bold"), text_color="#10b981")
-        self.lbl_sf_eval.pack(side=tk.LEFT)
-        
-        self.lbl_sf_depth = ctk.CTkLabel(stats_frame, text="Depth: 18/20", font=("Consolas", 10), text_color="#94a3b8")
-        self.lbl_sf_depth.pack(side=tk.RIGHT)
-        
-        # Best move suggestion
-        self.lbl_sf_best = ctk.CTkLabel(self.engine_mock_frame, text="Suggested best move: --", font=("Inter", 10, "italic"), text_color="#cbd5e1", anchor="w")
-        self.lbl_sf_best.pack(fill=tk.X, padx=10, pady=(0, 8))
-        
-        # Simulated Progress/Evaluation Bar
-        self.eval_bar = ctk.CTkProgressBar(self.card_stockfish, height=8, progress_color="#10b981", fg_color="#ef4444")
-        self.eval_bar.pack(fill=tk.X, padx=10, pady=(5, 10))
-        self.eval_bar.set(0.5) # Neutral center
-        
-        # Vote Button
-        self.btn_vote_sf = ctk.CTkButton(
-            self.card_stockfish,
-            text="Vote for this feature",
-            font=("Inter", 11),
-            fg_color="#334155",
-            hover_color="#475569",
-            height=26,
-            command=lambda: self.vote_feature("Stockfish Engine")
-        )
-        self.btn_vote_sf.pack(fill=tk.X, padx=10, pady=(0, 10))
-        
-        # --- FEATURE CARD 2: INTERACTIVE TRAINER ---
+        # --- FEATURE CARD 1: INTERACTIVE TRAINER ---
         self.card_trainer = ctk.CTkFrame(self.features_scroll, fg_color="#1e293b", border_width=1, border_color="#334155")
-        self.card_trainer.grid(row=3, column=0, pady=10, padx=5, sticky="ew")
+        self.card_trainer.grid(row=2, column=0, pady=10, padx=5, sticky="ew")
         
         header_trainer = ctk.CTkFrame(self.card_trainer, fg_color="transparent")
         header_trainer.pack(fill=tk.X, padx=10, pady=8)
@@ -466,9 +431,9 @@ class ChessMoveToolApp(ctk.CTk):
         )
         self.btn_vote_tr.pack(fill=tk.X, padx=10, pady=(0, 10))
         
-        # --- FEATURE CARD 3: MASTERS EXPLORER ---
+        # --- FEATURE CARD 2: MASTERS EXPLORER ---
         self.card_explorer = ctk.CTkFrame(self.features_scroll, fg_color="#1e293b", border_width=1, border_color="#334155")
-        self.card_explorer.grid(row=4, column=0, pady=10, padx=5, sticky="ew")
+        self.card_explorer.grid(row=3, column=0, pady=10, padx=5, sticky="ew")
         
         header_explorer = ctk.CTkFrame(self.card_explorer, fg_color="transparent")
         header_explorer.pack(fill=tk.X, padx=10, pady=8)
@@ -521,7 +486,7 @@ class ChessMoveToolApp(ctk.CTk):
         self.refresh_headers_panel()
         self.refresh_raw_pgn()
         self.update_opening_display()
-        self.update_mock_engine()
+        self.update_engine()
 
     def update_opening_display(self):
         """Fetches and shows the current opening name and ECO badge in the header."""
@@ -542,37 +507,295 @@ class ChessMoveToolApp(ctk.CTk):
             else:
                 self.lbl_opening_name.configure(text="Custom / Unknown Opening")
 
-    def update_engine_ui(self, board, raw_score, best_move):
-        """Safely updates engine GUI widgets with evaluation results (runs on main thread)."""
-        val_score = raw_score / 100.0
+    def setup_engine_panel(self):
+        """Creates the persistent Stockfish engine layout in the right sidebar."""
+        self.card_stockfish = ctk.CTkFrame(self.right_container, fg_color="#1e293b", border_width=1, border_color="#334155")
+        self.card_stockfish.grid(row=0, column=0, sticky="ew", pady=(0, 10))
         
-        # Format evaluation score relative to White
-        if val_score >= 0:
-            score_str = f"Score: +{val_score:.2f}"
-            self.lbl_sf_eval.configure(text=score_str, text_color="#10b981")
-        else:
-            score_str = f"Score: {val_score:.2f}"
-            self.lbl_sf_eval.configure(text=score_str, text_color="#ef4444")
-            
-        # Update evaluation bar (range from -8.0 to +8.0, centered at 0.5)
-        clipped_score = max(-8.0, min(8.0, val_score))
-        progress_val = (clipped_score + 8.0) / 16.0
-        self.eval_bar.set(progress_val)
+        # Title & Active Switch
+        header_stockfish = ctk.CTkFrame(self.card_stockfish, fg_color="transparent")
+        header_stockfish.pack(fill=tk.X, padx=10, pady=8)
         
-        # Display best move suggestion
-        if best_move:
-            san_move = board.san(best_move)
-            self.lbl_sf_best.configure(text=f"Suggested best move: {san_move}")
-        else:
-            self.lbl_sf_best.configure(text="Suggested best move: None")
-            
-        self.lbl_sf_depth.configure(text="Depth: 3/3")
+        lbl_sf_name = ctk.CTkLabel(header_stockfish, text="🤖 Stockfish Engine", font=("Inter", 13, "bold"), text_color="#f8fafc")
+        lbl_sf_name.pack(side=tk.LEFT)
+        
+        self.engine_switch = ctk.CTkSwitch(
+            header_stockfish, 
+            text="Active", 
+            font=("Inter", 11), 
+            command=self.toggle_engine
+        )
+        self.engine_switch.pack(side=tk.RIGHT)
+        
+        # --- State 1: Download Frame ---
+        self.engine_download_frame = ctk.CTkFrame(self.card_stockfish, fg_color="transparent")
+        
+        lbl_dl_desc = ctk.CTkLabel(
+            self.engine_download_frame,
+            text="Stockfish is not installed. Click to download and enable the engine.",
+            font=("Inter", 11),
+            text_color="#94a3b8",
+            wraplength=350,
+            justify=tk.LEFT
+        )
+        lbl_dl_desc.pack(pady=(5, 10), padx=5)
+        
+        self.btn_download_sf = ctk.CTkButton(
+            self.engine_download_frame,
+            text="📥 Download & Enable Stockfish (58 MB)",
+            font=("Inter", 11, "bold"),
+            fg_color="#0284c7",
+            hover_color="#0369a1",
+            command=self.start_download_stockfish
+        )
+        self.btn_download_sf.pack(fill=tk.X, padx=5, pady=(0, 5))
+        
+        self.download_progress = ctk.CTkProgressBar(self.engine_download_frame, height=8)
+        
+        self.lbl_download_status = ctk.CTkLabel(
+            self.engine_download_frame,
+            text="",
+            font=("Inter", 10, "italic"),
+            text_color="#e2e8f0"
+        )
+        self.lbl_download_status.pack(pady=2)
+        
+        # --- State 2: Analysis Frame ---
+        self.engine_analysis_frame = ctk.CTkFrame(self.card_stockfish, fg_color="transparent")
+        
+        self.engine_mock_frame = ctk.CTkFrame(self.engine_analysis_frame, fg_color="#0f172a", corner_radius=6)
+        self.engine_mock_frame.pack(fill=tk.X, padx=0, pady=5)
+        
+        # Engine stats row
+        stats_frame = ctk.CTkFrame(self.engine_mock_frame, fg_color="transparent")
+        stats_frame.pack(fill=tk.X, padx=10, pady=(8, 4))
+        
+        self.lbl_sf_eval = ctk.CTkLabel(stats_frame, text="Score: Offline", font=("Consolas", 11, "bold"), text_color="#94a3b8")
+        self.lbl_sf_eval.pack(side=tk.LEFT)
+        
+        self.lbl_sf_depth = ctk.CTkLabel(stats_frame, text="Depth: --", font=("Consolas", 10), text_color="#94a3b8")
+        self.lbl_sf_depth.pack(side=tk.RIGHT, padx=10)
+        
+        self.lbl_sf_speed = ctk.CTkLabel(stats_frame, text="Speed: --", font=("Consolas", 10), text_color="#94a3b8")
+        self.lbl_sf_speed.pack(side=tk.RIGHT)
+        
+        # Best move suggestion
+        self.lbl_sf_best = ctk.CTkLabel(self.engine_mock_frame, text="Suggested best move: --", font=("Inter", 11, "bold"), text_color="#cbd5e1", anchor="w")
+        self.lbl_sf_best.pack(fill=tk.X, padx=10, pady=(4, 2))
+        
+        # PV/Line suggestion
+        self.lbl_sf_pv = ctk.CTkLabel(
+            self.engine_mock_frame, 
+            text="Line: --", 
+            font=("Consolas", 10), 
+            text_color="#94a3b8", 
+            anchor="w",
+            justify=tk.LEFT,
+            wraplength=350
+        )
+        self.lbl_sf_pv.pack(fill=tk.X, padx=10, pady=(0, 8))
+        
+        # Progress/Evaluation Bar
+        self.eval_bar = ctk.CTkProgressBar(self.engine_analysis_frame, height=8, progress_color="#10b981", fg_color="#ef4444")
+        self.eval_bar.pack(fill=tk.X, padx=0, pady=(5, 5))
+        self.eval_bar.set(0.5) # Neutral center
+        
+        # Check local path and show display initial state
+        self.check_local_stockfish()
+        self.show_engine_card_state()
 
-    def update_mock_engine(self):
-        """Updates the mock engine card with semi-realistic stats based on the board state."""
-        # Stop any active background searches
-        self.stop_search_flag = True
+    def check_local_stockfish(self):
+        """Checks if Stockfish exists in assets, otherwise searches Downloads and copies it."""
+        if os.path.exists(self.stockfish_path):
+            return True
+            
+        downloads_path = "C:\\Users\\HP\\Downloads"
+        if os.path.exists(downloads_path):
+            # Try exact discovered path
+            exact_path = os.path.join(downloads_path, "stockfish-windows-x86-64-avx2", "stockfish", "stockfish-windows-x86-64-avx2.exe")
+            if os.path.exists(exact_path):
+                try:
+                    os.makedirs(os.path.dirname(self.stockfish_path), exist_ok=True)
+                    shutil.copy2(exact_path, self.stockfish_path)
+                    print(f"Automatically copied local Stockfish from Downloads to {self.stockfish_path}")
+                    return True
+                except Exception as e:
+                    print(f"Error copying local Stockfish: {e}")
+                    
+            # Fallback scan: Search Downloads directory recursively (up to 3 levels)
+            try:
+                for root, dirs, files in os.walk(downloads_path):
+                    depth = root[len(downloads_path):].count(os.sep)
+                    if depth > 3:
+                        continue
+                    for file in files:
+                        if file.lower().startswith("stockfish") and file.lower().endswith(".exe"):
+                            found_path = os.path.join(root, file)
+                            os.makedirs(os.path.dirname(self.stockfish_path), exist_ok=True)
+                            shutil.copy2(found_path, self.stockfish_path)
+                            print(f"Automatically found and copied local Stockfish from {found_path} to {self.stockfish_path}")
+                            return True
+            except Exception as e:
+                print(f"Error scanning downloads: {e}")
+                
+        return False
+
+    def show_engine_card_state(self):
+        """Displays either the download frame or the analysis frame depending on binary presence."""
+        if os.path.exists(self.stockfish_path):
+            self.engine_download_frame.pack_forget()
+            self.engine_analysis_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
+            self.engine_switch.configure(state="normal")
+        else:
+            self.engine_analysis_frame.pack_forget()
+            self.engine_download_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
+            self.engine_switch.deselect()
+            self.engine_switch.configure(state="disabled")
+
+    def start_download_stockfish(self):
+        """Starts the Stockfish downloader in a background thread."""
+        self.btn_download_sf.configure(state="disabled")
+        self.lbl_download_status.configure(text="Initializing download...")
+        self.download_progress.pack(fill=tk.X, pady=(5, 5))
+        self.download_progress.set(0)
         
+        t = threading.Thread(target=self.download_stockfish_thread, daemon=True)
+        t.start()
+
+    def download_stockfish_thread(self):
+        try:
+            os.makedirs(os.path.dirname(self.stockfish_path), exist_ok=True)
+            zip_path = self.stockfish_path.replace(".exe", ".zip")
+            
+            url = "https://github.com/official-stockfish/Stockfish/releases/download/sf_16.1/stockfish-windows-x86-64-avx2.zip"
+            req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
+            
+            self.after(0, lambda: self.lbl_download_status.configure(text="Downloading Stockfish zip (58MB)..."))
+            
+            with urllib.request.urlopen(req) as response:
+                total_size = int(response.headers.get('content-length', 0))
+                downloaded = 0
+                with open(zip_path, 'wb') as f:
+                    while True:
+                        chunk = response.read(1024 * 64)
+                        if not chunk:
+                            break
+                        f.write(chunk)
+                        downloaded += len(chunk)
+                        if total_size > 0:
+                            percent = downloaded / total_size
+                            self.after(0, lambda p=percent: self.update_download_progress(p))
+                            
+            self.after(0, lambda: self.lbl_download_status.configure(text="Extracting Stockfish executable..."))
+            
+            exe_name = "stockfish/stockfish-windows-x86-64-avx2.exe"
+            with zipfile.ZipFile(zip_path, "r") as z:
+                exe_data = z.read(exe_name)
+                
+            with open(self.stockfish_path, "wb") as f:
+                f.write(exe_data)
+                
+            try:
+                os.remove(zip_path)
+            except Exception:
+                pass
+                
+            self.after(0, self.on_download_complete)
+            
+        except Exception as e:
+            self.after(0, lambda err=e: self.on_download_failed(err))
+
+    def update_download_progress(self, percent):
+        self.download_progress.set(percent)
+        self.lbl_download_status.configure(text=f"Downloading: {percent * 100:.1f}%")
+
+    def on_download_complete(self):
+        messagebox.showinfo("Stockfish Engine", "Stockfish Engine downloaded and initialized successfully!")
+        self.show_engine_card_state()
+        self.engine_switch.select()
+        self.toggle_engine()
+
+    def on_download_failed(self, error):
+        messagebox.showerror("Download Failed", f"An error occurred while downloading Stockfish:\n{error}\n\nPlease check your internet connection and try again.")
+        self.btn_download_sf.configure(state="normal")
+        self.lbl_download_status.configure(text="Download failed. Click to retry.")
+        self.download_progress.pack_forget()
+
+    def toggle_engine(self):
+        self.engine_enabled = self.engine_switch.get()
+        if self.engine_enabled:
+            if not os.path.exists(self.stockfish_path):
+                self.show_engine_card_state()
+            else:
+                self.start_engine()
+        else:
+            self.stop_engine()
+            self.lbl_sf_eval.configure(text="Score: Offline", text_color="#94a3b8")
+            self.eval_bar.set(0.5)
+            self.lbl_sf_best.configure(text="Suggested best move: --")
+            self.lbl_sf_depth.configure(text="Depth: --")
+            self.lbl_sf_speed.configure(text="Speed: --")
+            self.lbl_sf_pv.configure(text="Line: --")
+            
+            # Clear engine best move arrow
+            if hasattr(self.board, "engine_best_move"):
+                self.board.engine_best_move = None
+                self.board.draw_board()
+
+    def start_engine(self):
+        """Initializes the Stockfish SimpleEngine process if not already running."""
+        if self.engine is None:
+            self.lbl_sf_eval.configure(text="Score: Starting...", text_color="#cbd5e1")
+            
+            def init_process():
+                try:
+                    import chess.engine
+                    self.engine = chess.engine.SimpleEngine.popen_uci(self.stockfish_path)
+                    self.engine.configure({"Threads": 2, "Hash": 32})
+                    self.after(0, self.on_engine_started)
+                except Exception as e:
+                    self.after(0, lambda err=e: self.on_engine_start_failed(err))
+                    
+            t = threading.Thread(target=init_process, daemon=True)
+            t.start()
+        else:
+            self.on_engine_started()
+
+    def on_engine_started(self):
+        self.engine_enabled = True
+        self.update_engine()
+
+    def on_engine_start_failed(self, error):
+        messagebox.showerror("Engine Error", f"Failed to start Stockfish engine:\n{error}\n\nFalling back to Minimax.")
+        self.engine_enabled = False
+        self.engine_switch.deselect()
+        self.lbl_sf_eval.configure(text="Score: Offline", text_color="#94a3b8")
+
+    def stop_engine(self):
+        self.stop_analysis()
+        if self.engine:
+            try:
+                self.engine.quit()
+            except Exception:
+                pass
+            self.engine = None
+
+    def stop_analysis(self):
+        self.stop_search_flag = True
+        if self.current_analysis:
+            try:
+                self.current_analysis.stop()
+            except Exception:
+                pass
+            self.current_analysis = None
+
+    def update_engine(self):
+        """Starts a background search for the current position using Stockfish."""
+        self.stop_analysis()
+        
+        if not self.engine_enabled or not self.engine:
+            return
+            
         board = self.game_manager.get_current_board()
         
         # Check if game is over
@@ -585,43 +808,137 @@ class ChessMoveToolApp(ctk.CTk):
                 self.eval_bar.set(1.0)
             self.lbl_sf_best.configure(text="Suggested best move: None")
             self.lbl_sf_depth.configure(text="Depth: --")
+            self.lbl_sf_speed.configure(text="Speed: --")
+            self.lbl_sf_pv.configure(text="Line: Checkmate")
+            
+            if hasattr(self.board, "engine_best_move"):
+                self.board.engine_best_move = None
+                self.board.draw_board()
             return
         elif board.is_game_over():
             self.lbl_sf_eval.configure(text="Score: 0.00", text_color="#e2e8f0")
             self.eval_bar.set(0.5)
             self.lbl_sf_best.configure(text="Suggested best move: None")
             self.lbl_sf_depth.configure(text="Depth: --")
+            self.lbl_sf_speed.configure(text="Speed: --")
+            self.lbl_sf_pv.configure(text="Line: Draw")
+            
+            if hasattr(self.board, "engine_best_move"):
+                self.board.engine_best_move = None
+                self.board.draw_board()
             return
             
-        # Display calculating indicator
         self.lbl_sf_eval.configure(text="Score: Calculating...", text_color="#cbd5e1")
         self.lbl_sf_best.configure(text="Suggested best move: Calculating...")
         self.lbl_sf_depth.configure(text="Depth: Calculating...")
+        self.lbl_sf_speed.configure(text="Speed: Calculating...")
+        self.lbl_sf_pv.configure(text="Line: Calculating...")
         
-        # Copy board to avoid race conditions with main thread GUI updates
         board_copy = board.copy()
         self.stop_search_flag = False
         
         def run_search():
             try:
-                raw_score, best_move = minimax(
-                    board_copy, 
-                    3, 
-                    -999999, 
-                    999999, 
-                    board_copy.turn == chess.WHITE, 
-                    stop_flag_func=lambda: self.stop_search_flag
-                )
-                if self.stop_search_flag:
-                    return
-                # Safely schedule GUI updates on Tkinter main event thread
-                self.after(0, lambda: self.update_engine_ui(board_copy, raw_score, best_move))
+                import chess.engine
+                with self.engine.analysis(board_copy) as analysis:
+                    self.current_analysis = analysis
+                    for info in analysis:
+                        if self.stop_search_flag:
+                            break
+                        
+                        score = info.get("score")
+                        depth = info.get("depth")
+                        nps = info.get("nps")
+                        pv = info.get("pv")
+                        
+                        # Throttle updates to GUI
+                        current_time = time.time()
+                        if current_time - self.last_engine_ui_update >= 0.1:
+                            self.last_engine_ui_update = current_time
+                            self.after(0, lambda s=score, d=depth, n=nps, p=pv: self.update_engine_ui_real(board_copy, s, d, n, p))
             except Exception as e:
                 print(f"Background engine search error: {e}")
-                self.after(0, lambda: self.lbl_sf_eval.configure(text="Score: Error", text_color="#ef4444"))
                 
         self.search_thread = threading.Thread(target=run_search, daemon=True)
         self.search_thread.start()
+
+    def update_engine_ui_real(self, board, score, depth, nps, pv):
+        """Safely updates engine GUI widgets with evaluation results (runs on main thread)."""
+        # Race-condition check: verify this update matches the current active FEN
+        if board.fen() != self.game_manager.get_current_board().fen():
+            return
+            
+        if not self.engine_enabled:
+            return
+            
+        if score:
+            score_white = score.white()
+            if score_white.is_mate():
+                mate_in = score_white.mate()
+                if mate_in >= 0:
+                    score_str = f"Score: +M{mate_in}"
+                    self.lbl_sf_eval.configure(text=score_str, text_color="#10b981")
+                    self.eval_bar.set(1.0)
+                else:
+                    score_str = f"Score: -M{abs(mate_in)}"
+                    self.lbl_sf_eval.configure(text=score_str, text_color="#ef4444")
+                    self.eval_bar.set(0.0)
+            else:
+                val_score = score_white.score() / 100.0
+                if val_score >= 0:
+                    score_str = f"Score: +{val_score:.2f}"
+                    self.lbl_sf_eval.configure(text=score_str, text_color="#10b981")
+                else:
+                    score_str = f"Score: {val_score:.2f}"
+                    self.lbl_sf_eval.configure(text=score_str, text_color="#ef4444")
+                    
+                clipped_score = max(-8.0, min(8.0, val_score))
+                progress_val = (clipped_score + 8.0) / 16.0
+                self.eval_bar.set(progress_val)
+                
+        if depth is not None:
+            self.lbl_sf_depth.configure(text=f"Depth: {depth}")
+            
+        if nps is not None:
+            speed_m = nps / 1000000.0
+            self.lbl_sf_speed.configure(text=f"Speed: {speed_m:.1f}M nps")
+            
+        if pv:
+            best_move = pv[0]
+            san_move = board.san(best_move)
+            self.lbl_sf_best.configure(text=f"Suggested best move: {san_move}")
+            
+            # Format PV SAN line
+            pv_list = []
+            temp_board = board.copy()
+            for i, m in enumerate(pv[:5]):
+                if temp_board.turn == chess.WHITE:
+                    prefix = f"{temp_board.fullmove_number}. "
+                else:
+                    prefix = f"{temp_board.fullmove_number}... " if i == 0 else ""
+                try:
+                    san = temp_board.san(m)
+                    pv_list.append(f"{prefix}{san}")
+                    temp_board.push(m)
+                except Exception:
+                    break
+            self.lbl_sf_pv.configure(text="Line: " + " ".join(pv_list))
+            
+            # Draw visual arrow for best move on board
+            self.board.engine_best_move = best_move
+            self.board.draw_board()
+
+    def on_closing(self):
+        """Cleans up engine resources before shutting down."""
+        self.engine_enabled = False
+        self.stop_analysis()
+        if self.engine:
+            try:
+                self.engine.quit()
+            except Exception:
+                pass
+            self.engine = None
+        self.destroy()
 
     def refresh_moves_tree(self):
         """Re-generates the interactive moves list view with nested variations and highlights."""

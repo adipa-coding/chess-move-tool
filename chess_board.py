@@ -37,6 +37,9 @@ class ChessBoard(tk.Canvas):
         self.drawn_arrows = {}
         self.right_click_start_square = None
         
+        # Engine best move arrow
+        self.engine_best_move = None
+        
         # Promotion state
         self.pending_promotion_move = None  # (from_sq, to_sq)
         self.promotion_overlay_items = []
@@ -95,6 +98,7 @@ class ChessBoard(tk.Canvas):
         """Clears all right-click arrows and circles."""
         self.drawn_circles.clear()
         self.drawn_arrows.clear()
+        self.engine_best_move = None
         self.draw_board()
 
     # --- Coordinate Mapping ---
@@ -513,6 +517,26 @@ class ChessBoard(tk.Canvas):
                     x1, y1, x2_arrow, y2_arrow,
                     fill=color, width=6, arrow=tk.LAST,
                     arrowshape=(16, 20, 8), tags="drawing"
+                )
+
+        # 7.5 Draw Engine Best Move Arrow (Dashed Blue Arrow)
+        if hasattr(self, "engine_best_move") and self.engine_best_move:
+            start = self.engine_best_move.from_square
+            end = self.engine_best_move.to_square
+            x1, y1 = self.get_square_center(start)
+            x2, y2 = self.get_square_center(end)
+            dx = x2 - x1
+            dy = y2 - y1
+            dist = math.hypot(dx, dy)
+            if dist > 0:
+                shrink = self.square_size // 3
+                x2_arrow = x2 - (dx / dist) * shrink
+                y2_arrow = y2 - (dy / dist) * shrink
+                self.create_line(
+                    x1, y1, x2_arrow, y2_arrow,
+                    fill="#3b82f6", width=6, arrow=tk.LAST,
+                    arrowshape=(16, 20, 8), tags="engine_arrow",
+                    dash=(4, 4)
                 )
 
         # 8. Draw Promotion Overlay (if active)
