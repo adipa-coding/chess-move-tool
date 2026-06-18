@@ -10,6 +10,23 @@ import urllib.request
 import zipfile
 import shutil
 import time
+import re
+
+def clean_comment(comment):
+    if not comment:
+        return ""
+    # Remove all [%...] command annotations
+    cleaned = re.sub(r'\[%[^\]]*\]', '', comment)
+    # Strip any extra spaces
+    cleaned = cleaned.strip()
+    return cleaned
+
+def extract_metadata(comment):
+    if not comment:
+        return ""
+    # Find all [%...] tags
+    tags = re.findall(r'\[%[^\]]*\]', comment)
+    return " ".join(tags)
 
 from game_manager import ChessGameManager
 from chess_board import ChessBoard
@@ -1118,8 +1135,9 @@ class ChessMoveToolApp(ctk.CTk):
         self.move_text.tag_bind(tag_name, "<Leave>", lambda e, t=tag_name: self.move_text.tag_config(t, underline=False))
         
         # Render inline comment if present
-        if node.comment:
-            comment_str = f" {{ {node.comment} }} "
+        cleaned_comment = clean_comment(node.comment) if node.comment else ""
+        if cleaned_comment:
+            comment_str = f" {{ {cleaned_comment} }} "
             self.move_text.insert(tk.END, comment_str, "comment")
             self.move_text.tag_config("comment", foreground="#10b981", font=("Inter", 10, "italic"))
             next_need_number = True
@@ -1164,7 +1182,8 @@ class ChessMoveToolApp(ctk.CTk):
         self.comment_box.delete("1.0", tk.END)
         comment = self.game_manager.get_comment()
         if comment:
-            self.comment_box.insert(tk.END, comment)
+            cleaned = clean_comment(comment)
+            self.comment_box.insert(tk.END, cleaned)
 
     def refresh_headers_panel(self):
         """Updates input header fields with current game metadata."""
@@ -1258,10 +1277,22 @@ class ChessMoveToolApp(ctk.CTk):
 
     def on_comment_focus_out(self, event):
         """Saves edited comments and updates the moves tree list when leaving textbox focus."""
-        comment = self.comment_box.get("1.0", tk.END).strip()
-        current_comment = self.game_manager.get_comment()
-        if comment != current_comment:
-            self.game_manager.set_comment(comment)
+        new_text = self.comment_box.get("1.0", tk.END).strip()
+        raw_comment = self.game_manager.get_comment() or ""
+        
+        # Extract metadata and clean current comment text
+        metadata = extract_metadata(raw_comment)
+        current_text = clean_comment(raw_comment)
+        
+        if new_text != current_text:
+            parts = []
+            if metadata:
+                parts.append(metadata)
+            if new_text:
+                parts.append(new_text)
+                
+            reconstructed_comment = " ".join(parts)
+            self.game_manager.set_comment(reconstructed_comment)
             self.refresh_moves_tree()
             self.refresh_raw_pgn()
 
