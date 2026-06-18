@@ -7,7 +7,8 @@ from PIL import Image, ImageTk
 THEME_URLS = {
     "neo": "https://images.chesscomfiles.com/chess-themes/pieces/neo/150/",
     "classic": "https://images.chesscomfiles.com/chess-themes/pieces/classic/150/",
-    "wood": "https://images.chesscomfiles.com/chess-themes/pieces/wood/150/"
+    "wood": "https://images.chesscomfiles.com/chess-themes/pieces/wood/150/",
+    "light": "https://images.chesscomfiles.com/chess-themes/pieces/light/150/"
 }
 
 PIECES = ["wp", "wn", "wb", "wr", "wq", "wk", "bp", "bn", "bb", "br", "bq", "bk"]
@@ -94,3 +95,5 @@ if __name__ == "__main__":
     print(f"Classic - Downloaded: {dl}, Errors: {err}")
     dl, err = download_theme_pieces("wood")
     print(f"Wood - Downloaded: {dl}, Errors: {err}")
+    dl, err = download_theme_pieces("light")
+    print(f"Light - Downloaded: {dl}, Errors: {err}")

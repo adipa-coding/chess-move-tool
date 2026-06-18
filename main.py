@@ -198,7 +198,7 @@ class ChessMoveToolApp(ctk.CTk):
         ctk.CTkLabel(self.theme_frame, text="Piece Set:").pack(side=tk.LEFT, padx=5)
         self.combo_piece_theme = ctk.CTkComboBox(
             self.theme_frame, 
-            values=["neo", "classic", "wood"], 
+            values=["neo", "classic", "wood", "light"], 
             command=self.change_piece_theme,
             width=100
         )
@@ -1621,5 +1621,4 @@ def minimax(board, depth, alpha, beta, maximizing_player, extensions=0, stop_fla
         return min_eval, best_move
 
 if __name__ == "__main__":
-    app = ChessMoveToolApp()
-    app.mainloop()
+    ChessMoveToolApp().mainloop()
