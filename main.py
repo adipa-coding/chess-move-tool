@@ -858,7 +858,7 @@ class ChessMoveToolApp(ctk.CTk):
                         current_time = time.time()
                         if bypass_throttle or (current_time - self.last_engine_ui_update >= 0.1):
                             self.last_engine_ui_update = current_time
-                            self.after(0, lambda s=score, d=depth, n=nps, p=pv: self.update_engine_ui_real(node, board_copy, s, d, n, p))
+                            self.after(0, lambda s=score, d=depth, n=nps, p=pv, nd=node, bd=board_copy: self.update_engine_ui_real(nd, bd, s, d, n, p))
                             
                 self.current_analysis = None
             except Exception as e:
