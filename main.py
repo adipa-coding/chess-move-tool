@@ -5,6 +5,7 @@ import chess
 import chess.pgn
 import os
 import threading
+import queue
 import urllib.request
 import zipfile
 import shutil
@@ -31,6 +32,7 @@ class ChessMoveToolApp(ctk.CTk):
         
         # Thread search state
         self.search_thread = None
+        self.search_queue = None
         self.stop_search_flag = False
         
         # Stockfish engine state
@@ -752,6 +754,11 @@ class ChessMoveToolApp(ctk.CTk):
                     import chess.engine
                     self.engine = chess.engine.SimpleEngine.popen_uci(self.stockfish_path)
                     self.engine.configure({"Threads": 2, "Hash": 32})
+                    
+                    self.search_queue = queue.Queue()
+                    self.search_thread = threading.Thread(target=self.search_worker, daemon=True)
+                    self.search_thread.start()
+                    
                     self.after(0, self.on_engine_started)
                 except Exception as e:
                     self.after(0, lambda err=e: self.on_engine_start_failed(err))
@@ -760,6 +767,56 @@ class ChessMoveToolApp(ctk.CTk):
             t.start()
         else:
             self.on_engine_started()
+
+    def search_worker(self):
+        """Sequential background search worker thread."""
+        import chess.engine
+        import time
+        
+        while self.engine_enabled and self.engine:
+            try:
+                if self.search_queue is None:
+                    break
+                request = self.search_queue.get()
+                if request is None:
+                    break
+                    
+                node, board_copy = request
+                self.stop_search_flag = False
+                
+                with self.engine.analysis(board_copy) as analysis:
+                    self.current_analysis = analysis
+                    for info in analysis:
+                        if self.stop_search_flag or not self.engine_enabled or not self.engine:
+                            break
+                            
+                        # If another request arrived in the queue, abort current analysis immediately
+                        if not self.search_queue.empty():
+                            break
+                            
+                        score = info.get("score")
+                        depth = info.get("depth")
+                        nps = info.get("nps")
+                        pv = info.get("pv")
+                        
+                        # Bypass UI throttling for mate evaluations and low depth (<10) to make response instant
+                        bypass_throttle = False
+                        if score:
+                            score_white = score.white()
+                            if score_white and score_white.is_mate():
+                                bypass_throttle = True
+                        if depth is not None and depth <= 10:
+                            bypass_throttle = True
+                            
+                        current_time = time.time()
+                        if bypass_throttle or (current_time - self.last_engine_ui_update >= 0.1):
+                            self.last_engine_ui_update = current_time
+                            self.after(0, lambda s=score, d=depth, n=nps, p=pv: self.update_engine_ui_real(node, board_copy, s, d, n, p))
+                            
+                self.current_analysis = None
+            except Exception as e:
+                print(f"Engine search worker error: {e}")
+                time.sleep(0.1)
 
     def on_engine_started(self):
         self.engine_enabled = True
@@ -773,6 +830,12 @@ class ChessMoveToolApp(ctk.CTk):
 
     def stop_engine(self):
         self.stop_analysis()
+        if self.search_queue:
+            try:
+                self.search_queue.put(None)
+            except Exception:
+                pass
+            self.search_queue = None
         if self.engine:
             try:
                 self.engine.quit()
@@ -791,8 +854,6 @@ class ChessMoveToolApp(ctk.CTk):
 
     def update_engine(self):
         """Starts a background search for the current position using Stockfish."""
-        self.stop_analysis()
-        
         if not self.engine_enabled or not self.engine:
             return
             
@@ -835,32 +896,21 @@ class ChessMoveToolApp(ctk.CTk):
         self.lbl_sf_pv.configure(text="Line: Calculating...")
         
         board_copy = board.copy()
-        self.stop_search_flag = False
         
-        def run_search():
-            try:
-                import chess.engine
-                with self.engine.analysis(board_copy) as analysis:
-                    self.current_analysis = analysis
-                    for info in analysis:
-                        if self.stop_search_flag:
-                            break
-                        
-                        score = info.get("score")
-                        depth = info.get("depth")
-                        nps = info.get("nps")
-                        pv = info.get("pv")
-                        
-                        # Throttle updates to GUI
-                        current_time = time.time()
-                        if current_time - self.last_engine_ui_update >= 0.1:
-                            self.last_engine_ui_update = current_time
-                            self.after(0, lambda s=score, d=depth, n=nps, p=pv: self.update_engine_ui_real(active_node_at_start, board_copy, s, d, n, p))
-            except Exception as e:
-                print(f"Background engine search error: {e}")
-                
-        self.search_thread = threading.Thread(target=run_search, daemon=True)
-        self.search_thread.start()
+        # Push the new analysis request to the worker thread queue
+        if hasattr(self, "search_queue") and self.search_queue:
+            # Clear queue of any stale search requests
+            while not self.search_queue.empty():
+                try:
+                    self.search_queue.get_nowait()
+                except Exception:
+                    break
+            
+            # Tell the active search to stop
+            self.stop_analysis()
+            
+            # Queue the new position
+            self.search_queue.put((active_node_at_start, board_copy))
 
     def update_engine_ui_real(self, node, board, score, depth, nps, pv):
         """Safely updates engine GUI widgets with evaluation results (runs on main thread)."""
@@ -875,7 +925,11 @@ class ChessMoveToolApp(ctk.CTk):
             score_white = score.white()
             if score_white.is_mate():
                 mate_in = score_white.mate()
-                if mate_in >= 0:
+                if mate_in == 0:
+                    score_str = "Score: #"
+                    self.lbl_sf_eval.configure(text=score_str, text_color="#10b981" if board.turn == chess.BLACK else "#ef4444")
+                    self.eval_bar.set(1.0 if board.turn == chess.BLACK else 0.0)
+                elif mate_in > 0:
                     score_str = f"Score: +M{mate_in}"
                     self.lbl_sf_eval.configure(text=score_str, text_color="#10b981")
                     self.eval_bar.set(1.0)
