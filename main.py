@@ -26,16 +26,35 @@ class ChessMoveToolApp(ctk.CTk):
         self.geometry("1200x750")
         self.minsize(1000, 650)
         
-        # Set window icon
-        icon_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets", "logo.png")
-        if os.path.exists(icon_path):
+        # Set window icon & Windows taskbar shortcut fix
+        import sys
+        if sys.platform.startswith('win'):
+            import ctypes
+            try:
+                ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("adipa.chessmovetool.app.1.0")
+            except Exception:
+                pass
+
+        logo_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets", "logo.png")
+        ico_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets", "icon.ico")
+        
+        if os.path.exists(logo_path):
             try:
                 from PIL import Image, ImageTk
-                img = Image.open(icon_path)
+                img = Image.open(logo_path)
                 photo = ImageTk.PhotoImage(img)
                 self.iconphoto(True, photo)
             except Exception as e:
                 print(f"Error setting window icon: {e}")
+                
+        if os.path.exists(ico_path):
+            try:
+                self.iconbitmap(ico_path)
+            except Exception:
+                try:
+                    self.wm_iconbitmap(ico_path)
+                except Exception:
+                    pass
         
         # Load state manager
         self.game_manager = ChessGameManager()
