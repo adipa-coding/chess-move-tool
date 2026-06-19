@@ -69,10 +69,12 @@ python main.py
 
 ## Project Structure
 
-- `main.py`: The entry point containing the CustomTkinter GUI layout, sidebar layout, tab system, and background Stockfish engine controllers.
-- `chess_board.py`: Manages chessboard rendering, square coloring, coordinates, drawing arrows/highlights, engine suggested moves, and move logic.
-- `game_manager.py`: Manages the underlying game state, move trees, variations, PGN imports/exports, autosaving, and opening name resolution.
+- `main.py`: The entry point containing the CustomTkinter GUI window, layout grids, tab panels, and sequential background Stockfish engine controllers.
+- `moves_tree.py`: Contains the custom `ChessMoveTree` component (subclassing `CTkScrollableFrame`), rendering the professional Chess.com style grid layout with alternating rows, inline nested variations with clickable tags, and viewport-centering autoscroll.
+- `chess_board.py`: Manages chessboard rendering, square coloring, coordinates mapping, drawing arrows/highlights, engine suggested moves, and move input logic.
+- `game_manager.py`: Manages the underlying game tree state, PGN imports/exports, autosaving, NAG annotations, and opening name resolution.
 - `theme.py`: Configures application color palettes, board theme presets, and move annotation NAG styles.
+- `download_assets.py`: Handles fetching and caching piece set graphics (Neo, Classic, Wood, Light) from Chess.com CDN file servers.
 - `compile_openings.py`: Utility script that downloads, parses, and compiles Lichess's open-source ECO database to `openings.json` using normalized FEN keys.
 - `openings.json`: The compiled database of 3,700+ opening variants, providing fast, offline opening recognition.
 
