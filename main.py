@@ -31,6 +31,7 @@ def extract_metadata(comment):
 from game_manager import ChessGameManager
 from chess_board import ChessBoard
 from theme import ANNOTATION_THEMES, ANNOTATION_STR_TO_NAG, BOARD_THEMES
+from moves_tree import ChessMoveTree
 
 ctk.set_appearance_mode("dark")
 ctk.set_default_color_theme("blue")
@@ -92,8 +93,8 @@ class ChessMoveToolApp(ctk.CTk):
         self.setup_ui()
         self.update_ui()
         
-        # Ensure scroll to active tag works on startup
-        self.after(500, self.scroll_to_active_move)
+        # Ensure moves list is scrolled to active move on startup after mapping
+        self.after(500, self.refresh_moves_tree)
         
         # Closing protocol
         self.protocol("WM_DELETE_WINDOW", self.on_closing)
@@ -245,28 +246,13 @@ class ChessMoveToolApp(ctk.CTk):
         self.moves_container.grid_columnconfigure(0, weight=1)
         self.moves_container.grid_rowconfigure(0, weight=1)
         
-        # Scrollbar for Moves
-        self.moves_scrollbar = tk.Scrollbar(self.moves_container)
-        self.moves_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
-        
-        # Raw text widget for formatting tree structure
-        self.move_text = tk.Text(
+        # ChessMoveTree component (which has a built-in scrollbar)
+        self.move_tree = ChessMoveTree(
             self.moves_container,
-            wrap=tk.WORD,
-            yscrollcommand=self.moves_scrollbar.set,
-            bg="#18181b",
-            fg="#e4e4e7",
-            font=("Inter", 11),
-            insertbackground="white",
-            relief=tk.FLAT,
-            padx=10,
-            pady=10
+            select_callback=self.select_node,
+            fg_color="#18181b"
         )
-        self.move_text.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-        self.moves_scrollbar.config(command=self.move_text.yview)
-        
-        # Make read-only except when drawing
-        self.move_text.config(state="disabled")
+        self.move_tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         
         # 2. Annotation badges panel (Chess.com badges)
         self.anno_frame = ctk.CTkFrame(self.tab_moves, fg_color="transparent")
@@ -1056,126 +1042,8 @@ class ChessMoveToolApp(ctk.CTk):
         self.destroy()
 
     def refresh_moves_tree(self):
-        """Re-generates the interactive moves list view with nested variations and highlights."""
-        # Record scroll position before refresh
-        y_scroll = self.move_text.yview()
-        
-        self.move_text.config(state="normal")
-        self.move_text.delete("1.0", tk.END)
-        self.active_tag = None
-        
-        # Traverse and render starting from root Variations
-        self.render_tree(self.game_manager.game, need_number=True, is_sub=False)
-        
-        if not self.game_manager.game.variations:
-            self.move_text.insert(tk.END, "No moves played yet. Use the board to make moves.", "placeholder")
-            self.move_text.tag_config("placeholder", foreground="#71717a", font=("Inter", 10, "italic"))
-            
-        self.move_text.config(state="disabled")
-        
-        # Restore scroll position
-        self.move_text.yview_moveto(y_scroll[0])
-        
-        # Scroll to active node
-        self.scroll_to_active_move()
-
-    def render_node_only(self, node, need_number, is_sub):
-        """Formats and inserts a single move node with annotations/comments into the text widget."""
-        board_before = node.parent.board()
-        move_str = board_before.san(node.move)
-        
-        # Get evaluation NAG annotation badge
-        nag = next(iter(node.nags)) if node.nags else None
-        nag_str = ""
-        if nag in ANNOTATION_THEMES:
-            nag_str = ANNOTATION_THEMES[nag]["symbol"]
-            
-        display_str = f"{move_str}{nag_str}"
-        
-        # Prefix with numbers (White moves get 'N. ', Black moves get 'N... ' if preceded by variation)
-        if board_before.turn == chess.WHITE:
-            prefix = f"{board_before.fullmove_number}. "
-            next_need_number = False
-        else:
-            if need_number:
-                prefix = f"{board_before.fullmove_number}... "
-            else:
-                prefix = ""
-            next_need_number = True
-            
-        if prefix:
-            self.move_text.insert(tk.END, prefix)
-            
-        # Clickable move text insert
-        start_idx = self.move_text.index("end-1c")
-        self.move_text.insert(tk.END, display_str)
-        end_idx = self.move_text.index("end-1c")
-        
-        tag_name = f"node_{id(node)}"
-        self.move_text.tag_add(tag_name, start_idx, end_idx)
-        
-        # Check if active move
-        is_active = (node == self.game_manager.active_node)
-        
-        # Apply themes to main and variation nodes
-        if is_active:
-            self.active_tag = tag_name
-            bg_color = "#1e3a8a" if not is_sub else "#581c87" # Deep blue / Deep purple for variations
-            fg_color = "#ffffff"
-            font_style = ("Inter", 11, "bold") if not is_sub else ("Inter", 10, "bold italic")
-            self.move_text.tag_config(tag_name, background=bg_color, foreground=fg_color, font=font_style)
-        else:
-            fg_color = "#e4e4e7" if not is_sub else "#a1a1aa"
-            font_style = ("Inter", 11, "bold") if not is_sub else ("Inter", 10, "italic")
-            self.move_text.tag_config(tag_name, foreground=fg_color, font=font_style, background="")
-            
-        # Bind events
-        self.move_text.tag_bind(tag_name, "<Button-1>", lambda e, n=node: self.select_node(n))
-        self.move_text.tag_bind(tag_name, "<Enter>", lambda e, t=tag_name: self.move_text.tag_config(t, underline=True))
-        self.move_text.tag_bind(tag_name, "<Leave>", lambda e, t=tag_name: self.move_text.tag_config(t, underline=False))
-        
-        # Render inline comment if present
-        cleaned_comment = clean_comment(node.comment) if node.comment else ""
-        if cleaned_comment:
-            comment_str = f" {{ {cleaned_comment} }} "
-            self.move_text.insert(tk.END, comment_str, "comment")
-            self.move_text.tag_config("comment", foreground="#10b981", font=("Inter", 10, "italic"))
-            next_need_number = True
-            
-        self.move_text.insert(tk.END, " ")
-        return next_need_number
-
-    def render_tree(self, node, need_number=True, is_sub=False):
-        """Recursively renders the entire variations tree structure."""
-        if not node.variations:
-            return
-            
-        main_child = node.variations[0]
-        sub_children = node.variations[1:]
-        
-        # 1. Draw main continuation move
-        next_need_number = self.render_node_only(main_child, need_number, is_sub)
-        
-        # 2. Draw sub-variations inside nested parentheses (recursively)
-        if sub_children:
-            for sub_child in sub_children:
-                self.move_text.insert(tk.END, "(")
-                sub_need_num = self.render_node_only(sub_child, True, True)
-                self.render_tree(sub_child, sub_need_num, True)
-                self.move_text.insert(tk.END, ") ")
-                
-            next_need_number = True
-            
-        # 3. Recursively continue main line continuation
-        self.render_tree(main_child, next_need_number, is_sub)
-
-    def scroll_to_active_move(self):
-        """Autoscrolls the moves list to show the currently selected move node."""
-        if self.active_tag:
-            try:
-                self.move_text.see(self.active_tag)
-            except Exception:
-                pass
+        """Re-generates the interactive moves list view using the new grid layout."""
+        self.move_tree.update_moves(self.game_manager.game, self.game_manager.active_node)
 
     def refresh_comment_box(self):
         """Reloads current position comments into the comment textbox."""
@@ -1621,4 +1489,5 @@ def minimax(board, depth, alpha, beta, maximizing_player, extensions=0, stop_fla
         return min_eval, best_move
 
 if __name__ == "__main__":
-    ChessMoveToolApp().mainloop()
+    app=ChessMoveToolApp()
+    app.mainloop()
